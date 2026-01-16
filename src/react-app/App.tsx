@@ -1,65 +1,43 @@
-// src/App.tsx
-
-import { useState } from "react";
-import reactLogo from "./assets/react.svg";
-import viteLogo from "/vite.svg";
-import cloudflareLogo from "./assets/Cloudflare_Logo.svg";
-import honoLogo from "./assets/hono.svg";
-import "./App.css";
+import { Button } from "@/components/ui/button";
+import { LiveTextViewer } from "@/components/LiveText";
+import { useOCR } from "@/hooks/useOCR";
 
 function App() {
-	const [count, setCount] = useState(0);
-	const [name, setName] = useState("unknown");
+	const { detect, result, isLoading, isInitializing, error } = useOCR();
+
+	const handleClick = () => {
+		detect("/report.png");
+	};
 
 	return (
-		<>
-			<div>
-				<a href="https://vite.dev" target="_blank">
-					<img src={viteLogo} className="logo" alt="Vite logo" />
-				</a>
-				<a href="https://react.dev" target="_blank">
-					<img src={reactLogo} className="logo react" alt="React logo" />
-				</a>
-				<a href="https://hono.dev/" target="_blank">
-					<img src={honoLogo} className="logo cloudflare" alt="Hono logo" />
-				</a>
-				<a href="https://workers.cloudflare.com/" target="_blank">
-					<img
-						src={cloudflareLogo}
-						className="logo cloudflare"
-						alt="Cloudflare logo"
-					/>
-				</a>
+		<div className="min-h-screen flex flex-col items-center justify-center gap-8 p-8">
+			<LiveTextViewer
+				src="/report.png"
+				alt="Report"
+				className="max-w-6xl w-full shadow-md rounded-lg overflow-hidden"
+				ocrResult={result}
+			/>
+
+			<div className="flex flex-col items-center gap-2">
+				<Button onClick={handleClick} disabled={isLoading}>
+					{isInitializing
+						? "加载模型中..."
+						: isLoading
+							? "识别中..."
+							: result
+								? "重新识别"
+								: "开始使用"}
+				</Button>
+
+				{error && <p className="text-red-500 text-sm">{error}</p>}
+
+				{result && (
+					<p className="text-muted-foreground text-sm">
+						识别到 {result.lines.length} 行文字，可直接选择复制
+					</p>
+				)}
 			</div>
-			<h1>Vite + React + Hono + Cloudflare</h1>
-			<div className="card">
-				<button
-					onClick={() => setCount((count) => count + 1)}
-					aria-label="increment"
-				>
-					count is {count}
-				</button>
-				<p>
-					Edit <code>src/App.tsx</code> and save to test HMR
-				</p>
-			</div>
-			<div className="card">
-				<button
-					onClick={() => {
-						fetch("/api/")
-							.then((res) => res.json() as Promise<{ name: string }>)
-							.then((data) => setName(data.name));
-					}}
-					aria-label="get name"
-				>
-					Name from API is: {name}
-				</button>
-				<p>
-					Edit <code>worker/index.ts</code> to change the name
-				</p>
-			</div>
-			<p className="read-the-docs">Click on the logos to learn more</p>
-		</>
+		</div>
 	);
 }
 
