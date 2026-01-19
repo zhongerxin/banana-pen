@@ -1,10 +1,10 @@
 import { Button } from "@/components/ui/button";
 import { LiveTextViewer } from "@/components/LiveText";
-import { useOCR } from "@/hooks/useOCR";
+import { useVolOCR } from "@/hooks/useVolOCR";
 import { useEffect } from "react";                                                             
 
 function App() {
-	const { detect, result, isLoading, isInitializing, error } = useOCR();
+	const { detect, result, isLoading, isInitializing, error } = useVolOCR();
 
 	const handleClick = () => {
 		detect("/report.png");
