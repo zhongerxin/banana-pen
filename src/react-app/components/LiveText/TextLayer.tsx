@@ -44,11 +44,11 @@ export function TextLayer({
 							height: `${height}px`,
 							fontSize: `${fontSize}px`,
 							lineHeight: `${height}px`,
-							color: "transparent",
+							// color: "transparent",
 							pointerEvents: "auto",
 							// Uncomment for debugging:
-							// backgroundColor: "rgba(255, 0, 0, 0.2)",
-							// color: "red",
+							backgroundColor: "rgba(255, 0, 0, 0.2)",
+							color: "red",
 						}}
 					>
 						{line.text}
