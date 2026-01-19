@@ -138,7 +138,7 @@ app.get("/api/", (c) => c.json({ name: "Cloudflare" }));
 
 /**
  * OCR 识别端点
- * 接收 base64 图片，调用火山引擎 OCRPdf API
+ * 接收 base64 图片，调用火山引擎 OCRPdf API (file_type=image)
  */
 app.post("/api/ocr", async (c) => {
 	try {
@@ -165,6 +165,8 @@ app.post("/api/ocr", async (c) => {
 		// 请求体 (application/x-www-form-urlencoded)
 		const bodyParams = new URLSearchParams();
 		bodyParams.append("image_base64", image_base64);
+		bodyParams.append("file_type", "image"); // 指定为图片类型，默认是 pdf
+		bodyParams.append("version", "v3"); // 版本号
 		const body = bodyParams.toString();
 
 		// 请求头
