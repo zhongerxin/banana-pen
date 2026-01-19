@@ -153,8 +153,8 @@ app.post("/api/ocr", async (c) => {
 		const path = "/";
 		const service = "cv";
 		const region = "cn-north-1";
-		const action = "MultiLanguageOCR";
-		const version = "2022-08-31";
+		const action = "OCRPdf";
+		const version = "2021-08-23";
 
 		// 查询参数
 		const queryParams = {
