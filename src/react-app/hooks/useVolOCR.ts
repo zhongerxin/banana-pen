@@ -1,18 +1,49 @@
 import { useState, useCallback, useRef } from "react";
 
 /**
- * 火山引擎 MultiLanguageOCR API 响应结构
+ * 火山引擎 OCRPdf API 响应结构
+ * 参考文档: https://www.volcengine.com/docs/6369/1288730
  */
+interface TextBlock {
+	text: string;
+	box: {
+		x0: number;
+		y0: number;
+		x1: number;
+		y1: number;
+	};
+	label: string;
+	norm_box?: {
+		x0: number;
+		y0: number;
+		x1: number;
+		y1: number;
+	};
+	font_size?: number;
+	is_bold?: boolean;
+	is_italic?: boolean;
+	url?: string;
+}
+
+interface PageResult {
+	page_id: number;
+	page_md: string;
+	page_image_hw: {
+		h: number;
+		w: number;
+	};
+	textblocks: TextBlock[];
+}
+
 interface VolcengineOCRResponse {
-	code?: number;
-	message?: string;
-	request_id?: string;
+	code: number;
+	message: string;
+	request_id: string;
+	time_elapsed?: string;
+	status?: number;
 	data?: {
-		line_texts?: Array<{
-			text: string;
-			confidence: number;
-			polygons: Array<{ x: number; y: number }>;
-		}>;
+		markdown: string;
+		detail: string | PageResult[]; // API 返回的是 JSON 字符串
 	};
 }
 
@@ -40,29 +71,17 @@ export interface OCRResult {
 }
 
 /**
- * 将火山引擎返回的多边形坐标转换为 CSS 友好的矩形框
+ * 将 OCRPdf 的 box 坐标转换为 CSS 友好的矩形框
  *
- * 输入: polygons 是多个点的坐标数组 [{ x, y }, { x, y }, ...]
- * 通常是 4 个角点：左上、右上、右下、左下
- *
- * 输出: 外接矩形 { left, top, width, height }
+ * 输入: box = { x0, y0, x1, y1 } 左上角和右下角坐标
+ * 输出: { left, top, width, height }
  */
-function polygonsToFrame(
-	polygons: Array<{ x: number; y: number }>
-): TextLine["frame"] {
-	const xs = polygons.map((p) => p.x);
-	const ys = polygons.map((p) => p.y);
-
-	const left = Math.min(...xs);
-	const top = Math.min(...ys);
-	const right = Math.max(...xs);
-	const bottom = Math.max(...ys);
-
+function boxToFrame(box: TextBlock["box"]): TextLine["frame"] {
 	return {
-		left,
-		top,
-		width: right - left,
-		height: bottom - top,
+		left: box.x0,
+		top: box.y0,
+		width: box.x1 - box.x0,
+		height: box.y1 - box.y0,
 	};
 }
 
@@ -70,11 +89,9 @@ function polygonsToFrame(
  * 将图片 URL 转换为 base64 字符串
  */
 async function imageUrlToBase64(imageUrl: string): Promise<string> {
-	// 加载图片
 	const response = await fetch(imageUrl);
 	const blob = await response.blob();
 
-	// 转换为 base64
 	return new Promise((resolve, reject) => {
 		const reader = new FileReader();
 		reader.onloadend = () => {
@@ -89,55 +106,15 @@ async function imageUrlToBase64(imageUrl: string): Promise<string> {
 }
 
 /**
- * 火山引擎 OCR Hook - 提供图片文字识别能力
- *
- * 与 useOCR 保持相同的接口，方便切换使用
- *
- * 数据流：
- * ```
- * 调用 detect("/image.png")
- *         │
- *         ▼
- * ┌───────────────────┐
- * │ imageUrlToBase64  │ ← 将图片转为 base64
- * └───────────────────┘
- *         │
- *         ▼
- * ┌───────────────────┐
- * │ POST /api/ocr     │ ← 调用后端 API
- * └───────────────────┘
- *         │
- *         ▼
- * ┌───────────────────┐
- * │ 火山引擎 OCR API  │ ← 后端调用火山引擎
- * └───────────────────┘
- *         │
- *         ▼
- * ┌───────────────────┐
- * │ polygonsToFrame   │ ← 坐标转换
- * └───────────────────┘
- *         │
- *         ▼
- * ┌───────────────────┐
- * │ setResult()       │ ← 触发 React 重渲染
- * └───────────────────┘
- * ```
+ * 火山引擎 OCRPdf Hook
  */
 export function useVolOCR() {
-	// 是否正在进行 OCR
 	const [isLoading, setIsLoading] = useState(false);
-	// 是否正在初始化（火山引擎方案不需要加载模型，设为 false）
 	const [isInitializing, setIsInitializing] = useState(false);
-	// 错误信息
 	const [error, setError] = useState<string | null>(null);
-	// OCR 结果
 	const [result, setResult] = useState<OCRResult | null>(null);
-	// 存储图片尺寸
 	const imageRef = useRef<{ width: number; height: number } | null>(null);
 
-	/**
-	 * 执行 OCR 识别
-	 */
 	const detect = useCallback(async (imageSrc: string) => {
 		setIsLoading(true);
 		setError(null);
@@ -154,7 +131,7 @@ export function useVolOCR() {
 			imageRef.current = { width: img.naturalWidth, height: img.naturalHeight };
 
 			// 将图片转换为 base64
-			setIsInitializing(true); // 复用此状态表示"准备中"
+			setIsInitializing(true);
 			const imageBase64 = await imageUrlToBase64(imageSrc);
 			setIsInitializing(false);
 
@@ -173,26 +150,51 @@ export function useVolOCR() {
 
 			const apiResult: VolcengineOCRResponse = await response.json();
 
-			// 检查 API 响应
-			if (apiResult.code && apiResult.code !== 0) {
+			// 打印响应以便调试
+			console.log("OCRPdf API response:", apiResult);
+
+			// 检查 API 响应 (10000 表示成功)
+			if (apiResult.code !== 10000) {
 				throw new Error(apiResult.message || "OCR API returned error");
 			}
 
-			// 转换数据格式
-			const lineTexts = apiResult.data?.line_texts || [];
-			const lines: TextLine[] = lineTexts
-				.filter((item) => item.polygons && item.polygons.length >= 4)
-				.map((item) => ({
-					text: item.text,
-					score: item.confidence,
-					frame: polygonsToFrame(item.polygons),
-				}));
+			// 解析 OCRPdf 响应格式
+			// data.detail 是 JSON 字符串，需要先解析
+			let detail: PageResult[] = [];
+			if (apiResult.data?.detail) {
+				if (typeof apiResult.data.detail === "string") {
+					detail = JSON.parse(apiResult.data.detail);
+				} else {
+					detail = apiResult.data.detail;
+				}
+			}
+			const lines: TextLine[] = [];
 
-			// 设置结果
+			for (const page of detail) {
+				const textblocks = page.textblocks || [];
+				for (const block of textblocks) {
+					if (block.box) {
+						lines.push({
+							text: block.text,
+							score: 1, // OCRPdf 不返回置信度，默认为 1
+							frame: boxToFrame(block.box),
+						});
+					}
+				}
+			}
+
+			// 从第一页获取图片尺寸（如果有）
+			let imageWidth = img.naturalWidth;
+			let imageHeight = img.naturalHeight;
+			if (detail.length > 0 && detail[0].page_image_hw) {
+				imageWidth = detail[0].page_image_hw.w;
+				imageHeight = detail[0].page_image_hw.h;
+			}
+
 			setResult({
 				lines,
-				imageWidth: img.naturalWidth,
-				imageHeight: img.naturalHeight,
+				imageWidth,
+				imageHeight,
 			});
 		} catch (err) {
 			console.error("OCR error:", err);

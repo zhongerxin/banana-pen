@@ -1,9 +1,10 @@
 import { Hono } from "hono";
 
-// 扩展 Env 类型以包含火山引擎凭证
+// 扩展 Env 类型以包含凭证
 interface WorkerEnv extends Env {
 	VOL_ACCESS_KEY_ID: string;
 	VOL_SECRET_ACCESS_KEY: string;
+	OPENROUTER_API_KEY: string;
 }
 
 const app = new Hono<{ Bindings: WorkerEnv }>();
@@ -225,6 +226,131 @@ app.post("/api/ocr", async (c) => {
 		return c.json(
 			{
 				error: "OCR request failed",
+				details: error instanceof Error ? error.message : String(error),
+			},
+			500
+		);
+	}
+});
+
+/**
+ * 图片编辑端点
+ * 使用 OpenRouter + Gemini 3 Pro Image Preview 替换图片中的文字
+ */
+app.post("/api/banana", async (c) => {
+	try {
+		const { image_base64, rect, text, imageWidth, imageHeight, mode = "text" } = await c.req.json<{
+			image_base64: string;
+			rect: { x: number; y: number; width: number; height: number };
+			text: string;
+			imageWidth: number;
+			imageHeight: number;
+			mode?: "text" | "free";
+		}>();
+
+		if (!image_base64 || !rect || !text) {
+			return c.json({ error: "image_base64, rect, and text are required" }, 400);
+		}
+
+		console.log(`[Banana API] 收到请求 - 模式: ${mode}, 原图尺寸: ${imageWidth}x${imageHeight}, 选区: (${rect.x}, ${rect.y}) ${rect.width}x${rect.height}`);
+
+		const apiKey = c.env.OPENROUTER_API_KEY;
+		if (!apiKey) {
+			return c.json({ error: "Missing OpenRouter API key" }, 500);
+		}
+
+		// 根据模式构建不同的提示词
+		let prompt: string;
+
+		if (mode === "free") {
+			// 任意修改模式
+			prompt = `You are an image editing assistant. I have an image that needs to be modified in a specific region.
+
+The image dimensions are ${imageWidth}x${imageHeight} pixels.
+
+I have selected a region at:
+- Position: (${Math.round(rect.x)}, ${Math.round(rect.y)})
+- Size: ${Math.round(rect.width)}x${Math.round(rect.height)} pixels
+
+Please modify this selected region according to the following instruction: "${text}"
+
+Important requirements:
+1. Generate a new image with EXACTLY the same dimensions (${imageWidth}x${imageHeight} pixels)
+2. Keep everything outside the selected region unchanged
+3. Apply the requested modification only within the specified region
+4. Make the modification look natural and blend well with the rest of the image
+
+Please generate the edited image.`;
+		} else {
+			// 文本替换模式
+			prompt = `You are an image editing assistant. I have an image with text that needs to be replaced.
+
+The image dimensions are ${imageWidth}x${imageHeight} pixels.
+
+I have selected a region at:
+- Position: (${Math.round(rect.x)}, ${Math.round(rect.y)})
+- Size: ${Math.round(rect.width)}x${Math.round(rect.height)} pixels
+
+Please replace the text in this selected region with: "${text}"
+
+Important requirements:
+1. Generate a new image with EXACTLY the same dimensions (${imageWidth}x${imageHeight} pixels)
+2. Keep everything else in the image unchanged
+3. Only modify the text in the specified region
+4. Match the original font style, size, and color as closely as possible
+5. The new text should fit naturally within the selected area
+
+Please generate the edited image.`;
+		}
+
+		// 调用 OpenRouter API
+		const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+			method: "POST",
+			headers: {
+				"Content-Type": "application/json",
+				"Authorization": `Bearer ${apiKey}`,
+				"HTTP-Referer": "https://banana-pen.pages.dev",
+				"X-Title": "Banana Pen",
+			},
+			body: JSON.stringify({
+				model: "google/gemini-3-pro-image-preview",
+				// model: "bytedance-seed/seedream-4.5",
+				modalities: ["image", "text"],
+				messages: [
+					{
+						role: "user",
+						content: [
+							{
+								type: "image_url",
+								image_url: {
+									url: `data:image/png;base64,${image_base64}`,
+								},
+							},
+							{
+								type: "text",
+								text: prompt,
+							},
+						],
+					},
+				],
+			}),
+		});
+
+		if (!response.ok) {
+			const errorText = await response.text();
+			console.error("OpenRouter API error:", errorText);
+			return c.json({ error: "OpenRouter API request failed", details: errorText }, 500);
+		}
+
+		const result = await response.json();
+
+		// 返回结果
+		return c.json(result);
+	} catch (error) {
+		console.error("Banana API error:", error);
+		return c.json(
+			{
+				error: "Image editing request failed",
 				details: error instanceof Error ? error.message : String(error),
 			},
 			500
